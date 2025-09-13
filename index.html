@@ -478,6 +478,7 @@
             });
 
             const ctx = document.getElementById('radarChart').getContext('2d');
+            let previousDatasets = []; // 追踪之前的数据集
             const radarChart = new Chart(ctx, {
                 type: 'radar',
                 data: {
@@ -486,7 +487,16 @@
                 },
                 options: {
                     maintainAspectRatio: false,
-                    animation: false, 
+                    animation: {
+                        duration: 800,
+                        easing: 'easeInOutQuart',
+                        onProgress: function(animation) {
+                            // 动画进度回调，可以在此处添加额外的动画逻辑
+                        },
+                        onComplete: function(animation) {
+                            // 动画完成后的回调
+                        }
+                    },
                     scales: {
                         r: {
                             angleLines: { color: 'rgba(0, 0, 0, 0.1)' },
@@ -539,20 +549,96 @@
             function updateChart() {
                 const selectedIds = Array.from(document.querySelectorAll('#checkbox-container input:checked')).map(cb => cb.value);
                 
-                radarChart.data.datasets = selectedIds.map((id) => {
+                // 获取之前存在的数据集ID
+                const previousIds = previousDatasets.map(dataset => {
+                    const item = aiJobData.find(d => d.name === dataset.label);
+                    return item ? item.id : null;
+                }).filter(id => id !== null);
+                
+                // 识别新添加和移除的线条
+                const newIds = selectedIds.filter(id => !previousIds.includes(id));
+                const removedIds = previousIds.filter(id => !selectedIds.includes(id));
+                const keepIds = selectedIds.filter(id => previousIds.includes(id));
+                
+                // 构建新的数据集
+                const newDatasets = selectedIds.map((id) => {
                     const item = aiJobData.find(d => d.id === id);
                     const colorIndex = aiJobData.findIndex(d => d.id === id) % borderColors.length;
-                    return {
+                    const isNewLine = newIds.includes(id);
+                    
+                    // 为新线条创建特殊的动画起始状态
+                    const baseDataset = {
                         label: item.name,
                         data: Object.values(item.ratings),
                         backgroundColor: 'transparent',
                         borderColor: borderColors[colorIndex],
                         pointBackgroundColor: borderColors[colorIndex],
                         pointRadius: 4,
-                        pointHoverRadius: 7
+                        pointHoverRadius: 7,
+                        borderWidth: 3,
+                        tension: 0.1
+                    };
+                    
+                    // 如果是新线条，初始设置为中心点（所有值为0）
+                    if (isNewLine) {
+                        return {
+                            ...baseDataset,
+                            // 在动画开始前，数据点设置为0，创建从中心向外的效果
+                            _originalData: Object.values(item.ratings),
+                            data: [0, 0, 0, 0], // 从中心开始
+                            borderColor: borderColors[colorIndex] + '80', // 初始半透明
+                        };
+                    }
+                    
+                    return baseDataset;
+                });
+                
+                // 更新图表数据
+                radarChart.data.datasets = newDatasets;
+                
+                if (newIds.length > 0) {
+                    // 先更新到初始状态（新线条在中心）
+                    radarChart.update('none');
+                    
+                    // 然后动画到最终状态
+                    setTimeout(() => {
+                        newDatasets.forEach((dataset, index) => {
+                            const id = selectedIds[index];
+                            if (newIds.includes(id)) {
+                                const item = aiJobData.find(d => d.id === id);
+                                const colorIndex = aiJobData.findIndex(d => d.id === id) % borderColors.length;
+                                
+                                // 恢复到真实数据和完全不透明
+                                dataset.data = Object.values(item.ratings);
+                                dataset.borderColor = borderColors[colorIndex];
+                            }
+                        });
+                        radarChart.update('active'); // 使用动画更新到最终状态
+                    }, 50);
+                } else if (removedIds.length > 0 && selectedIds.length > 0) {
+                    // 只是移除线条，但还有其他线条存在
+                    radarChart.update('resize'); // 轻微动画
+                } else {
+                    // 没有新增线条，或者清空所有线条
+                    radarChart.update('none');
+                }
+                
+                // 保存当前数据集用于下次比较
+                previousDatasets = newDatasets.map(dataset => {
+                    const item = aiJobData.find(d => d.name === dataset.label);
+                    const colorIndex = aiJobData.findIndex(d => d.id === item.id) % borderColors.length;
+                    return {
+                        label: dataset.label,
+                        data: Object.values(item.ratings),
+                        backgroundColor: 'transparent',
+                        borderColor: borderColors[colorIndex],
+                        pointBackgroundColor: borderColors[colorIndex],
+                        pointRadius: 4,
+                        pointHoverRadius: 7,
+                        borderWidth: 3,
+                        tension: 0.1
                     };
                 });
-                radarChart.update();
             }
 
             document.querySelectorAll('#checkbox-container input').forEach(checkbox => {
